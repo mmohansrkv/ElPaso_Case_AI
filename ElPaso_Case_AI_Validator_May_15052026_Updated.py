@@ -225,3 +225,10 @@ with tab_results:
             height=500,
         )
         st.caption(f"{len(df)} of {len(result_df)} rows shown")
+        # Styler.apply/.map require a unique index and unique columns —
+        # filtering result_df can leave duplicate index labels behind,
+        # and upstream merges can occasionally leave duplicate column names.
+        df = df.reset_index(drop=True)
+        df = df.loc[:, ~df.columns.duplicated()]
+
+        mismatch_cols = [c for c in df.columns if c.endswith("_Result")]
