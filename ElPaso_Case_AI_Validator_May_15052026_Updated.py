@@ -113,6 +113,13 @@ if run_clicked:
                 else:
                     result_df = core.validate(html_df, excel_df, active_fields, client_cases, norm_to_orig)
 
+                    # --- Safety net: ensure result_df has a clean, unique
+                    # index and unique column names as soon as it's created,
+                    # so downstream display/styling never trips on duplicates
+                    # coming from concat/merge operations inside core.py.
+                    result_df = result_df.reset_index(drop=True)
+                    result_df = result_df.loc[:, ~result_df.columns.duplicated()]
+
                     out_name = f"Result_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
                     out_path = os.path.join(tmpdir, out_name)
                     core.save_output(
@@ -197,10 +204,16 @@ with tab_results:
             df = df[mask]
 
         # Styler.apply/.map require a unique index and unique columns —
-        # filtering result_df can leave duplicate index labels behind,
-        # and upstream merges can occasionally leave duplicate column names.
+        # filtering can leave duplicate index labels behind, and upstream
+        # merges can occasionally leave duplicate column names.
         df = df.reset_index(drop=True)
         df = df.loc[:, ~df.columns.duplicated()]
+
+        # Temporary debug output — remove once confirmed fixed.
+        with st.expander("Debug info (safe to remove later)", expanded=False):
+            st.write("Columns:", df.columns.tolist())
+            st.write("Index is unique:", df.index.is_unique)
+            st.write("Columns is unique:", df.columns.is_unique)
 
         mismatch_cols = [c for c in df.columns if c.endswith("_Result")]
 
@@ -225,9 +238,21 @@ with tab_results:
         seen = set()
         display_cols = [c for c in display_cols if c in df.columns and not (c in seen or seen.add(c))]
 
-        st.dataframe(
-            df[display_cols].style.apply(highlight_status, axis=1),
-            use_container_width=True,
-            height=500,
-        )
+        show_df = df[display_cols].copy()
+        # Final guard: even after the earlier dedup, slicing by display_cols
+        # could theoretically reintroduce a repeated label if display_cols
+        # itself had a repeat that slipped past — this makes absolutely sure.
+        show_df = show_df.loc[:, ~show_df.columns.duplicated()]
+        show_df = show_df.reset_index(drop=True)
+
+        try:
+            st.dataframe(
+                show_df.style.apply(highlight_status, axis=1),
+                use_container_width=True,
+                height=500,
+            )
+        except KeyError as e:
+            st.error(f"Styling failed ({e}); showing unstyled table instead.")
+            st.dataframe(show_df, use_container_width=True, height=500)
+
         st.caption(f"{len(df)} of {len(result_df)} rows shown")
